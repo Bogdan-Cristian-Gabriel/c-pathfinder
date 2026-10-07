@@ -68,7 +68,6 @@ int *dijkstra(Graph g, int start, int dest) {\
 		node = par[node];
 	}
 	way[++dim] = -1;
-	printf("The destination is %f km away.\n", dis[dest]/ 1000.0);
 	free(par);
 	free(dis);
 	free(vis);
@@ -99,12 +98,26 @@ double haversine(double lat1, double lon1, double lat2, double lon2) {
 	return r * c;
 }
 
-int main() {
+int getClosestNode(Graph g, double targetLat, double targetLon) {
+	double minDist = 99999999.0;
+	int closestId = -1;
+	for (int i = 0; i < g->V; i++) {
+		int dist = (int)haversine(targetLat, targetLon, g->nodes[i].lat, g->nodes[i].lon);
+		if (dist < minDist) {
+			minDist = dist;
+			closestId = i;
+		}
+	}
+	return closestId;
+}
+
+int main(int argc, char *argv[]) {
+	if (argc != 5) return 1;
+
 	// Read the whole Overpass export into memory
 	FILE *map = fopen("map.json", "rb");
 
 	if (!map) {
-		printf("The map didn't load correctly.\n");
 		return 1;
 	}
 
@@ -120,7 +133,6 @@ int main() {
 
 	cJSON *json = cJSON_Parse(buffer);
 	if (!json) {
-		printf("The map has been corrupted.\n");
 		return 1;
 	}
 	free(buffer);
@@ -137,10 +149,14 @@ int main() {
 			V++;
 		}
 	}
-	printf("%d nodes have been loaded.\n", V);
 
 	Graph g = initGraph(V);
 	HashTable ht = initHashTable(V * 2);
+
+	double start_lat = atof(argv[1]);
+	double start_lon = atof(argv[2]);
+	double dest_lat = atof(argv[3]);
+	double dest_lon = atof(argv[4]);
 
 	// Second pass: give every node an internal index and record its
 	// coordinates, keyed by the OSM id that the ways refer to
@@ -183,20 +199,25 @@ int main() {
 
 	cJSON_Delete(json);
 
-	int start = 0;
-	int dest = 1000;
+	int start = getClosestNode(g, start_lat, start_lon);
+	int dest = getClosestNode(g, dest_lat, dest_lon);
 
 	// The route is a list of internal vertex indices, dest first and start
 	// last, terminated by -1.
 	int *route = dijkstra(g, start, dest);
-	int dim = 0;
-	while (route[dim] != -1) {
-		dim++;
+
+	printf("[\n");
+	int i = 0;
+	while (route[i] != -1) {
+		printf("  [%f, %f]", g->nodes[route[i]].lon, g->nodes[route[i]].lat);
+		if (route[i + 1] != -1) {
+			printf(",\n");
+		} else {
+			printf("\n");
+		}
+		i++;
 	}
-	// Print as [lon, lat] pairs, the coordinate order GeoJSON expects
-	for (int i = 0; i < dim; i++) {
-		printf("[%f, %f], ", g->nodes[route[i]].lon, g->nodes[route[i]].lat);
-	}
+	printf("]\n");
 
 	free(route);
 	ht = freeHashTable(ht);

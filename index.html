@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+	<meta charset="UTF-8">
+	<title>Waze Clone</title>
+	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+	<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+	<style>
+		body { margin: 0; padding: 0; }
+		#map { height: 100vh; width: 100vw; }
+
+		/* Distance readout, floating over the top-right of the map */
+		#route-info {
+			position: absolute;
+			top: 16px;
+			right: 16px;
+			z-index: 1000;
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			padding: 10px 14px;
+			border-radius: 10px;
+			background: rgba(255, 255, 255, 0.94);
+			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+			font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+			color: #10151c;
+			pointer-events: none;
+		}
+
+		/* An ID selector beats the user agent's [hidden] rule, so restate it */
+		#route-info[hidden] { display: none; }
+
+		#route-info .label {
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: 0.08em;
+			text-transform: uppercase;
+			color: #5b6673;
+		}
+
+		#route-info .value {
+			font-size: 20px;
+			font-weight: 650;
+			line-height: 1.1;
+			font-variant-numeric: tabular-nums;
+		}
+	</style>
+</head>
+<body>
+	<!-- Leaflet draws the map into this container -->
+	<div id="map"></div>
+
+	<!-- Filled in once a route comes back, hidden until then -->
+	<div id="route-info" hidden>
+		<span class="label">Distance</span>
+		<span class="value" id="route-distance"></span>
+	</div>
+
+	<script>
+		// Centred on Bucharest, the same area the routing graph covers
+		const map = L.map('map').setView([44.4268, 26.1025], 13);
+		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+		let startMarker = null;
+		let destMarker = null;
+		let routeLayer = null;
+
+		const routeInfo = document.getElementById('route-info');
+		const routeDistance = document.getElementById('route-distance');
+
+		// Metres below a kilometre, one decimal above it. Round first, so
+		// 999.6 m reads as 1.0 km rather than 1000 m.
+		function formatDistance(meters) {
+			const rounded = Math.round(meters);
+			return rounded < 1000
+				? `${rounded} m`
+				: `${(meters / 1000).toFixed(1)} km`;
+		}
+
+		// Walk the polyline and add up each leg, using the same 6371000 m radius
+		// and haversine the engine uses. Summed at full precision, so this reads
+		// a little longer than the engine's own total, which truncates every
+		// edge cost to whole metres (about 0.5 m lost per segment).
+		function polylineLength(latLngs) {
+			let meters = 0;
+			for (let i = 1; i < latLngs.length; i++) {
+				meters += map.distance(latLngs[i - 1], latLngs[i]);
+			}
+			return meters;
+		}
+
+		map.on('click', async (e) => {
+			// Two markers are already down, so this click starts over:
+			// drop both of them and the route line, on the map and in memory
+			if (startMarker && destMarker) {
+				map.removeLayer(startMarker);
+				map.removeLayer(destMarker);
+				if (routeLayer) map.removeLayer(routeLayer);
+
+				startMarker = null;
+				destMarker = null;
+				routeLayer = null;
+
+				routeInfo.hidden = true;
+			}
+
+			if (!startMarker) {
+				startMarker = L.marker(e.latlng).addTo(map);
+			}
+			else if (!destMarker) {
+				destMarker = L.marker(e.latlng).addTo(map);
+
+				const startLat = startMarker.getLatLng().lat;
+				const startLon = startMarker.getLatLng().lng;
+				const destLat = destMarker.getLatLng().lat;
+				const destLon = destMarker.getLatLng().lng;
+
+				try {
+					const response = await fetch(`http://localhost:3000/api/route?startLat=${startLat}&startLon=${startLon}&destLat=${destLat}&destLon=${destLon}`);
+					const routeCoords = await response.json();
+
+					// The API speaks GeoJSON [lon, lat]; Leaflet wants [lat, lng]
+					const latLngs = routeCoords.map(coord => [coord[1], coord[0]]);
+
+					routeLayer = L.polyline(latLngs, { color: '#0078FF', weight: 6 }).addTo(map);
+
+					routeDistance.textContent = formatDistance(polylineLength(latLngs));
+					routeInfo.hidden = false;
+
+					map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+				} catch (err) {
+					// Nothing usable came back, so leave no stale readout behind
+					console.error("Failed to fetch the route:", err);
+					routeInfo.hidden = true;
+				}
+			}
+		});
+	</script>
+</body>
+</html>
