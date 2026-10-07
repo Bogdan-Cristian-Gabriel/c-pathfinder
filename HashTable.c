@@ -2,10 +2,12 @@
 #include <stdio.h>
 #include "HashTable.h"
 
+// Map an OSM id onto a bucket index
 int hash(long long osm_id, int size) {
 	return osm_id % size;
 }
 
+// Allocate a table with `size` empty buckets
 HashTable initHashTable(int size) {
 	HashTable hashTable = malloc(sizeof(struct hashTable));
 	hashTable->size = size;
@@ -13,6 +15,7 @@ HashTable initHashTable(int size) {
 	return hashTable;
 }
 
+// Prepend a new entry to its bucket; a repeated key shadows the old mapping
 void put(HashTable table, long long osm_id, int internal_id) {
 	if (table == NULL) {
 		return;
@@ -26,6 +29,7 @@ void put(HashTable table, long long osm_id, int internal_id) {
 	table->buckets[index] = new;
 }
 
+// Walk the bucket's collision chain looking for osm_id
 int get(HashTable table, long long osm_id) {
 	if (table == NULL) {
 		return -1;
@@ -41,12 +45,23 @@ int get(HashTable table, long long osm_id) {
 	return iter->internal_id;
 }
 
+// Free every collision chain, then the bucket array, then the table itself
 HashTable freeHashTable(HashTable table) {
 	if (table == NULL) {
-		return;
+		return NULL;
 	}
 	if (table->buckets != NULL) {
-		
+		for (int i = 0; i < table->size; i++) {
+			// Save `next` before freeing, or the walk reads freed memory
+			HashNode iter = table->buckets[i], next;
+			while (iter != NULL) {
+				next = iter->next;
+				free(iter);
+				iter = next;
+			}
+		}
 		free(table->buckets);
 	}
+	free(table);
+	return NULL;
 }
